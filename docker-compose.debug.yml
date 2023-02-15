@@ -1,0 +1,86 @@
+version: '3.4'
+
+volumes:
+    keycloak-postgres-data:
+    keycloak-nginx-letsencrypt-ssl:
+
+services:
+  app1:
+    image: app1
+    container_name: app1
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    environment:
+      - NODE_ENV=development
+      - TZ=Europe/Rome
+    ports:
+      - 3000:3000
+      - 9229:9229
+    command: ["node", "--inspect=0.0.0.0:9229", "app/app.js"]
+
+  postgres:
+    image: postgres
+    container_name: postgres
+    volumes:
+      - keycloak-postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=keycloak
+      - POSTGRES_USER=keycloak
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - TZ=Europe/Rome
+    logging:
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: unless-stopped
+  keycloak:
+    image: "mihaibob/keycloak:18.0.2-legacy"
+    container_name: keycloak
+    depends_on:
+      - postgres
+    environment:
+      - DB_VENDOR=postgres
+      - DB_ADDR=postgres
+      - DB_USER=keycloak
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_DATABASE=keycloak
+      - PROXY_ADDRESS_FORWARDING=true
+      - KEYCLOAK_USER=admin
+      - KEYCLOAK_PASSWORD=${KEYCLOAK_PASSWORD}
+      - KEYCLOAK_IMPORT=/tmp/realm-export.json
+      - TZ=Europe/Rome
+    volumes:
+      - ./docker/realm-export.json:/tmp/realm-export.json
+    ports:
+      - "8080:8080"
+    logging:
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: unless-stopped
+  nginx:
+    build:
+      context: docker/keycloak-nginx-lets-encrypt
+    container_name: nginx
+    depends_on:
+      - keycloak
+    volumes:
+      - keycloak-nginx-letsencrypt-ssl:/etc/letsencrypt
+    environment:
+      - KEYCLOAK_HOST=keycloak
+      - KEYCLOAK_PORT=8080
+      - KEYCLOAK_DOMAIN=${KEYCLOAK_DOMAIN}
+      - LE_EMAIL=${LE_EMAIL}
+      - LE_OPTIONS=
+      - LE_RENEW_OPTIONS="--dry-run --no-self-upgrade --post-hook '"'nginx -s reload'"'"
+      - LE_RENEW_CRON_COMMAND="echo 'Dummy cron command'"
+      - TZ=Europe/Rome
+    logging:
+      options:
+        max-size: "50m"
+        max-file: "3"
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
